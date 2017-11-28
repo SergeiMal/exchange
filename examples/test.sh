@@ -1,15 +1,11 @@
 #!/bin/bash
 
-echo "test script started.."
-
 set -e
 
 # Exit status
 STATUS=0
 
-echo "test script started.."
-
-# Launches the blockchain demo and waits until it starts listening
+# Launches the exchange demo and waits until it starts listening
 # on the TCP port 8000.
 function launch-server {
     cd ..
@@ -24,7 +20,7 @@ function launch-server {
         echo "Failed to launch the server; aborting"
         exit 1
     fi
-    cd test
+    cd examples
 }
 
 # Kills whatever program is listening on the TCP port 8000, on which the cryptocurrency
@@ -36,29 +32,39 @@ function kill-server {
     fi
 }
 
-# make a bet in the exchange.
-#
-# Arguments:
-# - $1: filename with the transaction data
-function make-bet {
-    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/bets 2>/dev/null`
-}
 
 function order {
-    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/order 2>/dev/null`
+    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/excange/v1/order 2>/dev/null`
+}
+
+
+# Checks a response to an Exonum transaction.
+#
+# Arguments:
+# - $1: expected start of the transaction hash returned by the server
+function check-transaction {
+    if [[ `echo $RESP | jq .tx_hash` =~ ^\"$1 ]]; then
+        echo "OK, got expected transaction hash $1"
+    else
+        echo "Unexpected response: $RESP"
+        STATUS=1
+    fi
 }
 
 kill-server
 launch-server
 
-echo "make order for Serg..."
+echo "make all orders"
+order order1.json
 order order2.json
+order order3.json
+order order4.json
+order order5.json
 
-echo "make first bet for Serg..."
-make-bet make-bet.json
 
 echo "Waiting until transactions are committed..."
 sleep 7
+
 
 
 kill-server
