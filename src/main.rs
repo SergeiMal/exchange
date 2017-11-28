@@ -30,9 +30,8 @@ use iron::Handler;
 const SERVICE_ID: u16 = 101;
 // Identifier for order transaction type
 const TX_ORDER_ID: u16 = 1;
-const TX_ORDER2_ID: u16 = 2;
 // Identifier for cancel order transaction type
-const TX_CANCEL_ID: u16 = 3;
+const TX_CANCEL_ID: u16 = 2;
 
 const ORDER_TYPE_BUY: u64 = 0;
 const ORDER_TYPE_SELL: u64 = 1;
@@ -65,6 +64,18 @@ impl Bet {
         Bet::new( self.name(), remaining_amount, self.rate(), self.order_id(), self.order_type() )
     }
 }
+
+/// cancel order.
+//encoding_struct! {
+//    struct CancelBet {
+//        const SIZE = 16;
+//
+//        field name:        &str   [00 => 08]
+//        field order_id:    &u64   [08 => 16]
+//    }
+//}
+//
+//impl Bet {}
 
 // // // // // // // // // // DATA LAYOUT // // // // // // // // // //
 
@@ -118,18 +129,17 @@ message! {
 }
 
 /// cancel order.
-//message! {
-//    struct TxCancel {
-//        const TYPE = SERVICE_ID;
-//        const ID = TX_CANCEL_ID;
-//        const SIZE = 20;
-//
-//        //field pub_key: &PublicKey [00 => 32]
-//        field name:        &str   [00 => 08]
-//        field order_id:    &u16   [08 => 12]
-//        field seed:        u64    [12 => 20]
-//    }
-//}
+message! {
+    struct TxCancel {
+        const TYPE = SERVICE_ID;
+        const ID = TX_CANCEL_ID;
+        const SIZE = 16;
+
+        field name:        &str   [00 => 08]
+        field order_id:    u64    [08 => 16]
+
+    }
+}
 
 // // // // // // // // // // CONTRACTS // // // // // // // // // //
 
@@ -245,6 +255,37 @@ impl Transaction for TxOrder {
     }
 }
 
+impl Transaction for TxCancel{
+    /// Verify integrity of the transaction by checking the transaction
+    /// signature.
+    fn verify(&self) -> bool {
+        println!("transaction cancel verify key ");
+        true
+    }
+
+    /// Apply logic to the storage when executing the transaction.
+    fn execute(&self, view: &mut Fork) {
+        println!("transaction cancel execute");
+        let mut schema = ExchangeSchema { view };
+        let mut cancel :bool = false;
+        {
+            let bet: Bet = schema.bets().get(&self.order_id()).unwrap();
+            if bet.name() == self.name() {
+                cancel = true;
+            }
+        }
+        if cancel {
+            schema.bets().remove(&self.order_id());
+        }
+
+        schema.show_bets();
+    }
+
+    fn info(&self) -> serde_json::Value {
+        serde_json::to_value(&self).expect("Cannot serialize transaction to JSON")
+    }
+}
+
 // // // // // // // // // // REST API // // // // // // // // // //
 
 /// Implement the node API.
@@ -283,6 +324,24 @@ impl CryptocurrencyApi {
             Err(e) => Err(ApiError::IncorrectRequest(Box::new(e)))?,
         }
     }
+
+    fn post_cancel_bet<T>(&self, req: &mut Request) -> IronResult<Response>
+        where
+            T: Transaction + Clone + for<'de> Deserialize<'de>,
+    {
+        match req.get::<bodyparser::Struct<T>>() {
+            Ok(Some(transaction)) => {
+                let transaction: Box<Transaction> = Box::new(transaction);
+                let tx_hash = transaction.hash();
+                self.channel.send(transaction).map_err(ApiError::from)?;
+                let json = TransactionResponse { tx_hash };
+                self.ok_response(&serde_json::to_value(&json).unwrap())
+            }
+            Ok(None) => Err(ApiError::IncorrectRequest("Empty request body".into()))?,
+            Err(e) => Err(ApiError::IncorrectRequest(Box::new(e)))?,
+        }
+    }
+
 }
 
 /// Implement the `Api` trait.
@@ -295,11 +354,14 @@ impl Api for CryptocurrencyApi {
 
         let self_ = self.clone();
         let post_make_bet = move |req: &mut Request| self_.post_make_bet::<TxOrder>(req);
+        let self_ = self.clone();
+        let post_cancel_bet = move |req: &mut Request| self_.post_cancel_bet::<TxCancel>(req);
 
         println!("implementing Api of CryptocurrencyApi: fn wire");
 
         // Bind handlers to specific routes.
         router.post("/v1/order", post_make_bet, "post_make_bet");
+        router.post("/v1/cancel", post_cancel_bet, "post_cancel_bet");
     }
 }
 
@@ -322,7 +384,7 @@ impl Service for CurrencyService {
     fn tx_from_raw(&self, raw: RawTransaction) -> Result<Box<Transaction>, encoding::Error> {
         let trans: Box<Transaction> = match raw.message_type() {
             TX_ORDER_ID => Box::new(TxOrder::from_raw(raw)?),
-            TX_ORDER2_ID => Box::new(TxOrder2::from_raw(raw)?),
+            TX_CANCEL_ID => Box::new(TxCancel::from_raw(raw)?),
             _ => {
                 return Err(encoding::Error::IncorrectMessageType {
                     message_type: raw.message_type(),

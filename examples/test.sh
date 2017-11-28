@@ -65,13 +65,15 @@ order order-3.json
 order order-4.json
 order order-5.json
 
+#echo "Waiting until transactions are committed..."
+sleep 10
+
 echo "cancel 4th order"
 cancel-order order-4-cancel.json
 
-#echo "Waiting until transactions are committed..."
-sleep 17
 #echo "transactions proicess..."
-#sleep 2
+sleep 5
+
 
 kill-server
 exit $STATUS
