@@ -10,14 +10,12 @@ extern crate iron;
 
 use exonum::blockchain::{Blockchain, Service, GenesisConfig, Transaction, ApiContext,
                          ValidatorKeys};
-
 use exonum::node::{Node, NodeConfig, NodeApiConfig, TransactionSend, ApiSender};
 use exonum::messages::{RawTransaction, FromRaw};
 use exonum::storage::{Fork, MemoryDB, MapIndex};
 use exonum::api::{Api, ApiError};
 use exonum::encoding;
-use exonum::crypto::{Hash, PublicKey};
-
+use exonum::crypto::{Hash};
 use router::Router;
 use serde::Deserialize;
 use iron::prelude::*;
@@ -254,8 +252,7 @@ impl Transaction for TxCancel {
         {
             if str::eq(
                 schema.orders().get(&self.order_id()).unwrap().name(),
-                self.name(),
-            )
+                self.name() )
             {
                 cancel = true;
             }
