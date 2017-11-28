@@ -5,7 +5,6 @@ extern crate serde_derive;
 #[macro_use]
 extern crate exonum;
 extern crate bodyparser;
-
 extern crate router;
 extern crate iron;
 
@@ -136,7 +135,7 @@ impl Transaction for TxOrder {
     /// signature.
     fn verify(&self) -> bool {
         let mut res = true;
-        if !(str::eq(self.order_type(), ORDER_TYPE_BUY) ||
+        if self.amount() == 0 || !(str::eq(self.order_type(), ORDER_TYPE_BUY) ||
                  str::eq(self.order_type(), ORDER_TYPE_SELL))
         {
             res = false
@@ -146,12 +145,6 @@ impl Transaction for TxOrder {
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        //println!("transaction execute begin for <{}> amount = {}",self.name(), self.amount());
-
-        if !(self.amount() > 0) {
-            return;
-        }
-
         let mut schema = ExchangeSchema { view };
 
         let mut vorders_change: Vec<Order> = vec![];
@@ -256,7 +249,6 @@ impl Transaction for TxCancel {
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        //println!("transaction cancel execute for {:?}, name {}", self, self.name());
         let mut schema = ExchangeSchema { view };
         let mut cancel: bool = false;
         {
@@ -412,24 +404,19 @@ fn main() {
     let db = MemoryDB::new();
     let services: Vec<Box<Service>> = vec![Box::new(CurrencyService)];
     let blockchain = Blockchain::new(Box::new(db), services);
-
     let (consensus_public_key, consensus_secret_key) = exonum::crypto::gen_keypair();
     let (service_public_key, service_secret_key) = exonum::crypto::gen_keypair();
-
     let validator_keys = ValidatorKeys {
         consensus_key: consensus_public_key,
         service_key: service_public_key,
     };
     let genesis = GenesisConfig::new(vec![validator_keys].into_iter());
-
     let api_address = "0.0.0.0:8000".parse().unwrap();
     let api_cfg = NodeApiConfig {
         public_api_address: Some(api_address),
         ..Default::default()
     };
-
     let peer_address = "0.0.0.0:2000".parse().unwrap();
-
     let node_cfg = NodeConfig {
         listen_address: peer_address,
         peers: vec![],
