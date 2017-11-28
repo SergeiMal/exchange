@@ -37,8 +37,8 @@ function order {
     RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/order 2>/dev/null`
 }
 
-function order2 {
-    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/order2 2>/dev/null`
+function cancel-order {
+    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/cancel 2>/dev/null`
 }
 
 
@@ -65,6 +65,8 @@ order order-3.json
 order order-4.json
 order order-5.json
 
+echo "cancel 4th order"
+cancel-order order-4-cancel.json
 
 #echo "Waiting until transactions are committed..."
 sleep 17
