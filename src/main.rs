@@ -14,7 +14,7 @@ use exonum::blockchain::{Blockchain, Service, GenesisConfig, Transaction, ApiCon
 
 use exonum::node::{Node, NodeConfig, NodeApiConfig, TransactionSend,
                    ApiSender};
-use exonum::messages::{RawTransaction, FromRaw, Message};
+use exonum::messages::{RawTransaction, FromRaw};
 use exonum::storage::{Fork, MemoryDB, MapIndex};
 use exonum::api::{Api, ApiError};
 use exonum::encoding;
@@ -27,13 +27,15 @@ use iron::Handler;
 
 
 // Service identifier
-const SERVICE_ID: u16 = 1;
+const SERVICE_ID: u16 = 101;
 // Identifier for order transaction type
 const TX_ORDER_ID: u16 = 1;
 const TX_ORDER2_ID: u16 = 2;
 // Identifier for cancel order transaction type
 const TX_CANCEL_ID: u16 = 3;
 
+const ORDER_TYPE_BUY: u64 = 0;
+const ORDER_TYPE_SELL: u64 = 1;
 
 // // // // // // // // // // PERSISTENT DATA // // // // // // // // // //
 
@@ -46,20 +48,21 @@ const TX_CANCEL_ID: u16 = 3;
 /// [1]: https://exonum.com/doc/architecture/serialization
 encoding_struct! {
     struct Bet {
-        const SIZE = 32;
+        const SIZE = 40;
 
-        field name:        &str   [00 => 08]
+        field name:        &str  [00 => 08]
         field amount:      u64   [08 => 16]
         field rate:        u64   [16 => 24]
-        field order_type:  u64   [24 => 32]
+        field order_id:    u64   [24 => 32]
+        field order_type:  u64   [32 => 40]
     }
 }
 
 /// Add methods to the `Bet` type for changing balance.
 impl Bet {
-    pub fn decrease(self, amount: u64) -> Self {
-        let remnant = self.amount() - amount;
-        Self::new(self.name(), remnant , self.rate(), self.order_type())
+    pub fn decrease(&self, amount: u64) -> Self {
+        let remaining_amount = self.amount() - amount;
+        Bet::new( self.name(), remaining_amount, self.rate(), self.order_id(), self.order_type() )
     }
 }
 
@@ -128,22 +131,6 @@ message! {
 //    }
 //}
 
-message! {
-    struct TxOrder2 {
-        const TYPE = SERVICE_ID;
-        const ID = TX_ORDER2_ID;
-        const SIZE = 8;
-
-
-        field name:        &str   [00 => 08]
-
-        //field rate:        u64   [16 => 24]
-        //field order_id:    u16   [24 => 26]
-        //field order_type:  u16   [26 => 28]
-        //field seed:        u64   [48 => 56]
-    }
-}
-
 // // // // // // // // // // CONTRACTS // // // // // // // // // //
 
 /// Execute a transaction.
@@ -157,54 +144,100 @@ impl Transaction for TxOrder {
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        println!("transaction execute begin");
+        println!("transaction execute begin for <{}> amount = {}",self.name(), self.amount());
+
+        if !(self.amount() > 0) {
+            return;
+        }
 
         let mut schema = ExchangeSchema { view };
 
-/*
-name:
-amount:
-rate:
-order_type:
-*/
+        let mut vbets_change :Vec<Bet> = vec![];
+        let mut vbets_remove :Vec<Bet> = vec![];
 
-        let bet = Bet::new( self.name(), self.amount(), self.rate(), self.order_type());
+        let mut new_bet = Bet::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type());
 
-        schema.bets().put(&self.order_id(), bet);
-        //if( self.order_type() ) {// want to buy
-          // check
-        //    let v = schema.bets();
-            //for value in &v.values()
-            //{
-            //    value.
-            //}
+        if new_bet.order_type() == ORDER_TYPE_BUY {
+            let bets = schema.bets();
+            let values = bets.values();
 
-            //for (order_id, bet:&Bet) in &v {
-            //    bet
-            //    println!("next bet {:?}", bet);
-            //}
+            for bet in /*schema.bets().values()*/values {
+                if bet.order_type() == ORDER_TYPE_SELL {
+                    if new_bet.rate() >= bet.rate(){
+                        if new_bet.amount() == bet.amount() {
+                            vbets_remove.push(bet);
+
+                            break;
+                        }
+                        else if new_bet.amount() > bet.amount() {
+                            new_bet = new_bet.decrease( bet.amount() );
+                            vbets_remove.push(bet);
+
+                            continue;
+                        }
+                        else { // new_bet.amount() < bet.amount()
+                            let bet = bet.decrease(new_bet.amount() );
+                            vbets_change.push(bet);
+
+                            new_bet = new_bet.decrease( new_bet.amount() );
+
+                            break;
+                        }
+                    }
+                } // bet.order_type() == ORDER_TYPE_SELL
+            }
+        }
+        else {// new_bet.order_type() == ORDER_TYPE_SELL
+            //ORDER_TYPE_SELL => {}
+            let bets = schema.bets();
+            let values = bets.values();
+
+            for bet in /*schema.bets().values()*/values {
+                if bet.order_type() == ORDER_TYPE_BUY {
+                    if new_bet.rate() <= bet.rate(){
+                        if new_bet.amount() == bet.amount() {
+                            vbets_remove.push(bet);
+
+                            break;
+                        }
+                        else if new_bet.amount() > bet.amount() {
+                            new_bet = new_bet.decrease( bet.amount() );
+                            vbets_remove.push(bet);
+
+                            continue;
+                        }
+                        else { // new_bet.amount() < bet.amount()
+                            let bet = bet.decrease(new_bet.amount() );
+                            vbets_change.push(bet);
+
+                            new_bet = new_bet.decrease( new_bet.amount() );
+
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // update  schema with new date
+        // 1. remove satisfied orders form the que
+        for bet in vbets_remove {
+            schema.bets().remove(&bet.order_id());
+        }
+        // 2. change partially satisfied orders
+        for bet in vbets_change {
+            schema.bets().remove(&bet.order_id());
+            schema.bets().put(&bet.order_id(), bet);
+        }
+        // 3. add new bed into the order if any
+        if new_bet.amount() > 0 {
+            schema.bets().put(&new_bet.order_id(), new_bet);
+        }
 
 
-        //}
+        // add new order to the que or do buying/selling in case
+        //schema.process(Bet::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type()));
         schema.show_bets();
-    }
-
-    fn info(&self) -> serde_json::Value {
-        serde_json::to_value(&self).expect("Cannot serialize transaction to JSON")
-    }
-}
-
-impl Transaction for TxOrder2 {
-    /// Verify integrity of the transaction by checking the transaction
-    /// signature.
-    fn verify(&self) -> bool {
-        println!("transaction Order 2 verify begin");
-        true
-    }
-
-    /// Apply logic to the storage when executing the transaction.
-    fn execute(&self, view: &mut Fork) {
-        println!("transaction Order 2 execute begin");
     }
 
     fn info(&self) -> serde_json::Value {
@@ -229,16 +262,6 @@ struct TransactionResponse {
 
 /// Shortcut to get data on wallets.
 impl CryptocurrencyApi {
-
-    fn post_order<T>(&self, _: &mut Request) -> IronResult<Response>
-        where
-            T: Transaction + Clone + for<'de> Deserialize<'de>,
-    {
-        println!("post_order: ");
-
-        self.not_found_response(&serde_json::to_value("Order not found").unwrap())
-    }
-
     /// Common processing for transaction-accepting endpoints.
     fn post_make_bet<T>(&self, req: &mut Request) -> IronResult<Response>
         where
@@ -248,15 +271,12 @@ impl CryptocurrencyApi {
 
         match req.get::<bodyparser::Struct<T>>() {
             Ok(Some(transaction)) => {
-                println!("CryptocurrencyApi: fn post_transaction do");
                 let transaction: Box<Transaction> = Box::new(transaction);
-                println!("CryptocurrencyApi: fn post_transaction do 1");
+                println!("CryptocurrencyApi: fn post_transaction transaction: {:?}", transaction);
                 let tx_hash = transaction.hash();
-                println!("CryptocurrencyApi: fn post_transaction do 2");
+                println!("CryptocurrencyApi: fn post_transaction tx_hash: {:?}", tx_hash);
                 self.channel.send(transaction).map_err(ApiError::from)?;
-                println!("CryptocurrencyApi: fn post_transaction do 3");
                 let json = TransactionResponse { tx_hash };
-                println!("CryptocurrencyApi: fn post_transaction responsed");
                 self.ok_response(&serde_json::to_value(&json).unwrap())
             }
             Ok(None) => Err(ApiError::IncorrectRequest("Empty request body".into()))?,
@@ -275,14 +295,11 @@ impl Api for CryptocurrencyApi {
 
         let self_ = self.clone();
         let post_make_bet = move |req: &mut Request| self_.post_make_bet::<TxOrder>(req);
-        let self_ = self.clone();
-        let post_order = move |req: &mut Request| self_.post_order::<TxOrder>(req);
 
         println!("implementing Api of CryptocurrencyApi: fn wire");
 
         // Bind handlers to specific routes.
-        router.post("/v1/bets", post_make_bet, "post_make_bet");
-        router.post("/v1/order", post_order, "post_order");
+        router.post("/v1/order", post_make_bet, "post_make_bet");
     }
 }
 
@@ -303,8 +320,6 @@ impl Service for CurrencyService {
 
     /// Implement a method to deserialize transactions coming to the node.
     fn tx_from_raw(&self, raw: RawTransaction) -> Result<Box<Transaction>, encoding::Error> {
-        println!("implementing Service: fn tx_from_raw begin");
-
         let trans: Box<Transaction> = match raw.message_type() {
             TX_ORDER_ID => Box::new(TxOrder::from_raw(raw)?),
             TX_ORDER2_ID => Box::new(TxOrder2::from_raw(raw)?),
@@ -314,22 +329,17 @@ impl Service for CurrencyService {
                 });
             }
         };
-        println!("implementing Service: fn tx_from_raw end");
         Ok(trans)
     }
 
     /// Create a REST `Handler` to process web requests to the node.
     fn public_api_handler(&self, ctx: &ApiContext) -> Option<Box<Handler>> {
-        println!("implementing Service: fn public_api_handler begin");
-
         let mut router = Router::new();
         let api = CryptocurrencyApi {
             channel: ctx.node_channel().clone(),
             blockchain: ctx.blockchain().clone(),
         };
         api.wire(&mut router);
-        println!("implementing Service: fn public_api_handler end");
-
         Some(Box::new(router))
     }
 }
@@ -339,7 +349,6 @@ impl Service for CurrencyService {
 fn main() {
     exonum::helpers::init_logger().unwrap();
 
-    println!("Creating in-memory database...");
     let db = MemoryDB::new();
     let services: Vec<Box<Service>> = vec![Box::new(CurrencyService)];
     let blockchain = Blockchain::new(Box::new(db), services);

@@ -34,7 +34,11 @@ function kill-server {
 
 
 function order {
-    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/excange/v1/order 2>/dev/null`
+    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/order 2>/dev/null`
+}
+
+function order2 {
+    RESP=`curl -H "Content-Type: application/json" -X POST -d @$1 http://127.0.0.1:8000/api/services/exchange/v1/order2 2>/dev/null`
 }
 
 
@@ -55,17 +59,17 @@ kill-server
 launch-server
 
 echo "make all orders"
-order order1.json
-order order2.json
-order order3.json
-order order4.json
-order order5.json
+order order-1.json
+order order-2.json
+order order-3.json
+order order-4.json
+order order-5.json
 
 
-echo "Waiting until transactions are committed..."
-sleep 7
-
-
+#echo "Waiting until transactions are committed..."
+sleep 17
+#echo "transactions proicess..."
+#sleep 2
 
 kill-server
 exit $STATUS
