@@ -4,7 +4,7 @@
         "amount": "10",
         "rate": "50",
         "order_id": "3",
-        "order_type": "0"
+        "order_type": "buy"
     },
     "network_id": 0,
     "protocol_version": 0,

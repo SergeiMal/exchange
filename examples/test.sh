@@ -60,19 +60,19 @@ launch-server
 
 echo "make all orders"
 order order-1.json
-check-transaction e1afeef0
+check-transaction d1332daf
 
 order order-2.json
-check-transaction 48129993
+check-transaction 14228ca2
 
 order order-3.json
-check-transaction f7a3cd4a
+check-transaction fd6b0fb5
 
 order order-4.json
-check-transaction 2d48446b
+check-transaction 089fd231
 
 order order-5.json
-check-transaction 2320a35c
+check-transaction bb0f498c
 
 #echo "Waiting until transactions are committed..."
 sleep 6
@@ -80,7 +80,7 @@ sleep 6
 echo "cancel 4th order"
 cancel-order order-4-cancel.json
 
-#echo "transactions proicess..."
+#echo "transactions proicessed..."
 sleep 3
 
 curl http://127.0.0.1:8000/api/services/exchange/v1/get_info

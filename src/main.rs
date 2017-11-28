@@ -33,8 +33,8 @@ const TX_ORDER_ID: u16 = 1;
 // Identifier for cancel order transaction type
 const TX_CANCEL_ID: u16 = 2;
 
-const ORDER_TYPE_BUY: u64 = 0;
-const ORDER_TYPE_SELL: u64 = 1;
+const ORDER_TYPE_BUY: &str = "buy";
+const ORDER_TYPE_SELL: &str = "sell";
 
 // // // // // // // // // // PERSISTENT DATA // // // // // // // // // //
 
@@ -46,22 +46,22 @@ const ORDER_TYPE_SELL: u64 = 1;
 ///
 /// [1]: https://exonum.com/doc/architecture/serialization
 encoding_struct! {
-    struct Bet {
+    struct Order {
         const SIZE = 40;
 
         field name:        &str  [00 => 08]
         field amount:      u64   [08 => 16]
         field rate:        u64   [16 => 24]
         field order_id:    u64   [24 => 32]
-        field order_type:  u64   [32 => 40]
+        field order_type:  &str  [32 => 40]
     }
 }
 
-/// Add methods to the `Bet` type for changing balance.
-impl Bet {
+/// Add methods to the `Order` type for changing balance.
+impl Order {
     pub fn decrease(&self, amount: u64) -> Self {
         let remaining_amount = self.amount() - amount;
-        Bet::new( self.name(), remaining_amount, self.rate(), self.order_id(), self.order_type() )
+        Order::new( self.name(), remaining_amount, self.rate(), self.order_id(), self.order_type() )
     }
 }
 
@@ -81,15 +81,15 @@ pub struct ExchangeSchema<'a> {
 ///
 /// [`MapIndex`]: https://exonum.com/doc/architecture/storage#mapindex
 impl<'a> ExchangeSchema<'a> {
-    pub fn bets(&mut self) -> MapIndex<&mut Fork, u64, Bet> {
-        MapIndex::new("exchange.bets", self.view)
+    pub fn orders(&mut self) -> MapIndex<&mut Fork, u64, Order> {
+        MapIndex::new("exchange.orders", self.view)
     }
 
-    pub fn show_bets(&mut self) {
-        let bets : MapIndex<&mut Fork, u64, Bet> = MapIndex::new("exchange.bets", self.view);
-        for bet in bets.values()
+    pub fn show_orders(&mut self) {
+        let orders : MapIndex<&mut Fork, u64, Order> = MapIndex::new("exchange.orders", self.view);
+        for order in orders.values()
             {
-                println!(" beets <{:?}> ",  bet);
+                println!(" orders: <{:?}> ",  order);
             }
     }
 }
@@ -107,7 +107,7 @@ message! {
         field amount:      u64   [08 => 16]
         field rate:        u64   [16 => 24]
         field order_id:    u64   [24 => 32]
-        field order_type:  u64   [32 => 40]
+        field order_type:  &str  [32 => 40]
     }
 }
 
@@ -131,13 +131,16 @@ impl Transaction for TxOrder {
     /// Verify integrity of the transaction by checking the transaction
     /// signature.
     fn verify(&self) -> bool {
-        println!("transaction verify key ");
-        true
+        let mut res = true;
+        if !( str::eq(self.order_type(), ORDER_TYPE_BUY) || str::eq(self.order_type(), ORDER_TYPE_SELL) ) {
+            res = false
+        }
+        res
     }
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        println!("transaction execute begin for <{}> amount = {}",self.name(), self.amount());
+        //println!("transaction execute begin for <{}> amount = {}",self.name(), self.amount());
 
         if !(self.amount() > 0) {
             return;
@@ -145,65 +148,64 @@ impl Transaction for TxOrder {
 
         let mut schema = ExchangeSchema { view };
 
-        let mut vbets_change :Vec<Bet> = vec![];
-        let mut vbets_remove :Vec<Bet> = vec![];
+        let mut vorders_change :Vec<Order> = vec![];
+        let mut vorders_remove :Vec<Order> = vec![];
 
-        let mut new_bet = Bet::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type());
+        let mut new_order = Order::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type());
 
-        if new_bet.order_type() == ORDER_TYPE_BUY {
-            let bets = schema.bets();
-            let values = bets.values();
+        if str::eq(new_order.order_type(), ORDER_TYPE_BUY) {
+            let orders = schema.orders();
+            let values = orders.values();
 
-            for bet in values {
-                if bet.order_type() == ORDER_TYPE_SELL {
-                    if new_bet.rate() >= bet.rate(){
-                        if new_bet.amount() == bet.amount() {
-                            vbets_remove.push(bet);
+            for order in values {
+                if str::eq(order.order_type(), ORDER_TYPE_SELL) {
+                    if new_order.rate() >= order.rate(){
+                        if new_order.amount() == order.amount() {
+                            vorders_remove.push(order);
 
                             break;
                         }
-                        else if new_bet.amount() > bet.amount() {
-                            new_bet = new_bet.decrease( bet.amount() );
-                            vbets_remove.push(bet);
+                        else if new_order.amount() > order.amount() {
+                            new_order = new_order.decrease( order.amount() );
+                            vorders_remove.push(order);
 
                             continue;
                         }
-                        else { // new_bet.amount() < bet.amount()
-                            let bet = bet.decrease(new_bet.amount() );
-                            vbets_change.push(bet);
+                        else { // new_order.amount() < order.amount()
+                            let order = order.decrease(new_order.amount() );
+                            vorders_change.push(order);
 
-                            new_bet = new_bet.decrease( new_bet.amount() );
+                            new_order = new_order.decrease( new_order.amount() );
 
                             break;
                         }
                     }
-                } // bet.order_type() == ORDER_TYPE_SELL
+                } // order.order_type() == ORDER_TYPE_SELL
             }
         }
-        else {// new_bet.order_type() == ORDER_TYPE_SELL
-            //ORDER_TYPE_SELL => {}
-            let bets = schema.bets();
-            let values = bets.values();
+        else {// new_order.order_type() == ORDER_TYPE_SELL
+            let orders = schema.orders();
+            let values = orders.values();
 
-            for bet in values {
-                if bet.order_type() == ORDER_TYPE_BUY {
-                    if new_bet.rate() <= bet.rate(){
-                        if new_bet.amount() == bet.amount() {
-                            vbets_remove.push(bet);
+            for order in values {
+                if str::eq(order.order_type(), ORDER_TYPE_BUY) {
+                    if new_order.rate() <= order.rate(){
+                        if new_order.amount() == order.amount() {
+                            vorders_remove.push(order);
 
                             break;
                         }
-                        else if new_bet.amount() > bet.amount() {
-                            new_bet = new_bet.decrease( bet.amount() );
-                            vbets_remove.push(bet);
+                        else if new_order.amount() > order.amount() {
+                            new_order = new_order.decrease( order.amount() );
+                            vorders_remove.push(order);
 
                             continue;
                         }
-                        else { // new_bet.amount() < bet.amount()
-                            let bet = bet.decrease(new_bet.amount() );
-                            vbets_change.push(bet);
+                        else { // new_order.amount() < order.amount()
+                            let order = order.decrease(new_order.amount() );
+                            vorders_change.push(order);
 
-                            new_bet = new_bet.decrease( new_bet.amount() );
+                            new_order = new_order.decrease( new_order.amount() );
 
                             break;
                         }
@@ -214,20 +216,20 @@ impl Transaction for TxOrder {
 
         // update  schema with new date
         // 1. remove satisfied orders form the que
-        for bet in vbets_remove {
-            schema.bets().remove(&bet.order_id());
+        for order in vorders_remove {
+            schema.orders().remove(&order.order_id());
         }
         // 2. change partially satisfied orders
-        for bet in vbets_change {
-            schema.bets().remove(&bet.order_id());
-            schema.bets().put(&bet.order_id(), bet);
+        for order in vorders_change {
+            schema.orders().remove(&order.order_id());
+            schema.orders().put(&order.order_id(), order);
         }
         // 3. add new bed into the order if any
-        if new_bet.amount() > 0 {
-            schema.bets().put(&new_bet.order_id(), new_bet);
+        if new_order.amount() > 0 {
+            schema.orders().put(&new_order.order_id(), new_order);
         }
 
-        schema.show_bets();
+        //schema.show_orders();
     }
 
     fn info(&self) -> serde_json::Value {
@@ -239,25 +241,24 @@ impl Transaction for TxCancel{
     /// Verify integrity of the transaction by checking the transaction
     /// signature.
     fn verify(&self) -> bool {
-        println!("transaction cancel verify key");
         true
     }
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        println!("transaction cancel execute for {:?}, name {}", self, self.name());
+        //println!("transaction cancel execute for {:?}, name {}", self, self.name());
         let mut schema = ExchangeSchema { view };
         let mut cancel :bool = false;
         {
-            if str::eq(schema.bets().get(&self.order_id()).unwrap().name(), self.name()) {
+            if str::eq(schema.orders().get(&self.order_id()).unwrap().name(), self.name()) {
                 cancel = true;
             }
         }
         if cancel {
-            schema.bets().remove(&self.order_id());
+            schema.orders().remove(&self.order_id());
         }
 
-        schema.show_bets();
+        //schema.show_orders();
     }
 
     fn info(&self) -> serde_json::Value {
@@ -283,7 +284,7 @@ struct TransactionResponse {
 /// Shortcut to get data on wallets.
 impl CryptocurrencyApi {
     /// Common processing for transaction-accepting endpoints.
-    fn post_make_bet<T>(&self, req: &mut Request) -> IronResult<Response>
+    fn post_make_order<T>(&self, req: &mut Request) -> IronResult<Response>
         where
             T: Transaction + Clone + for<'de> Deserialize<'de>,
     {
@@ -300,7 +301,7 @@ impl CryptocurrencyApi {
         }
     }
 
-    fn post_cancel_bet<T>(&self, req: &mut Request) -> IronResult<Response>
+    fn post_cancel_order<T>(&self, req: &mut Request) -> IronResult<Response>
         where
             T: Transaction + Clone + for<'de> Deserialize<'de>,
     {
@@ -321,9 +322,9 @@ impl CryptocurrencyApi {
     fn get_info(&self, _: &mut Request) -> IronResult<Response> {
         let mut view = self.blockchain.fork();
         let mut schema = ExchangeSchema { view: &mut view };
-        let idx = schema.bets();
-        let orders: Vec<Bet> = idx.values().collect();
-        println!("CryptocurrencyApi: fn get_info: {:?}", orders);
+        let idx = schema.orders();
+        let orders: Vec<Order> = idx.values().collect();
+
         self.ok_response(&serde_json::to_value(&orders).unwrap())
     }
 }
@@ -335,15 +336,15 @@ impl CryptocurrencyApi {
 impl Api for CryptocurrencyApi {
     fn wire(&self, router: &mut Router) {
         let self_ = self.clone();
-        let post_make_bet = move |req: &mut Request| self_.post_make_bet::<TxOrder>(req);
+        let post_make_order = move |req: &mut Request| self_.post_make_order::<TxOrder>(req);
         let self_ = self.clone();
-        let post_cancel_bet = move |req: &mut Request| self_.post_cancel_bet::<TxCancel>(req);
+        let post_cancel_order = move |req: &mut Request| self_.post_cancel_order::<TxCancel>(req);
         let self_ = self.clone();
         let get_info = move |req: &mut Request| self_.get_info(req);
 
         // Bind handlers to specific routes.
-        router.post("/v1/order", post_make_bet, "post_make_bet");
-        router.post("/v1/cancel", post_cancel_bet, "post_cancel_bet");
+        router.post("/v1/order", post_make_order, "post_make_order");
+        router.post("/v1/cancel", post_cancel_order, "post_cancel_order");
         router.get("/v1/get_info", get_info, "get_info");
     }
 }
