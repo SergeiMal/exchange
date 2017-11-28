@@ -12,8 +12,7 @@ extern crate iron;
 use exonum::blockchain::{Blockchain, Service, GenesisConfig, Transaction, ApiContext,
                          ValidatorKeys};
 
-use exonum::node::{Node, NodeConfig, NodeApiConfig, TransactionSend,
-                   ApiSender};
+use exonum::node::{Node, NodeConfig, NodeApiConfig, TransactionSend, ApiSender};
 use exonum::messages::{RawTransaction, FromRaw};
 use exonum::storage::{Fork, MemoryDB, MapIndex};
 use exonum::api::{Api, ApiError};
@@ -61,7 +60,13 @@ encoding_struct! {
 impl Order {
     pub fn decrease(&self, amount: u64) -> Self {
         let remaining_amount = self.amount() - amount;
-        Order::new( self.name(), remaining_amount, self.rate(), self.order_id(), self.order_type() )
+        Order::new(
+            self.name(),
+            remaining_amount,
+            self.rate(),
+            self.order_id(),
+            self.order_type(),
+        )
     }
 }
 
@@ -86,11 +91,10 @@ impl<'a> ExchangeSchema<'a> {
     }
 
     pub fn show_orders(&mut self) {
-        let orders : MapIndex<&mut Fork, u64, Order> = MapIndex::new("exchange.orders", self.view);
-        for order in orders.values()
-            {
-                println!(" orders: <{:?}> ",  order);
-            }
+        let orders: MapIndex<&mut Fork, u64, Order> = MapIndex::new("exchange.orders", self.view);
+        for order in orders.values() {
+            println!(" orders: <{:?}> ", order);
+        }
     }
 }
 
@@ -132,7 +136,9 @@ impl Transaction for TxOrder {
     /// signature.
     fn verify(&self) -> bool {
         let mut res = true;
-        if !( str::eq(self.order_type(), ORDER_TYPE_BUY) || str::eq(self.order_type(), ORDER_TYPE_SELL) ) {
+        if !(str::eq(self.order_type(), ORDER_TYPE_BUY) ||
+                 str::eq(self.order_type(), ORDER_TYPE_SELL))
+        {
             res = false
         }
         res
@@ -148,10 +154,16 @@ impl Transaction for TxOrder {
 
         let mut schema = ExchangeSchema { view };
 
-        let mut vorders_change :Vec<Order> = vec![];
-        let mut vorders_remove :Vec<Order> = vec![];
+        let mut vorders_change: Vec<Order> = vec![];
+        let mut vorders_remove: Vec<Order> = vec![];
 
-        let mut new_order = Order::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type());
+        let mut new_order = Order::new(
+            self.name(),
+            self.amount(),
+            self.rate(),
+            self.order_id(),
+            self.order_type(),
+        );
 
         if str::eq(new_order.order_type(), ORDER_TYPE_BUY) {
             let orders = schema.orders();
@@ -159,53 +171,51 @@ impl Transaction for TxOrder {
 
             for order in values {
                 if str::eq(order.order_type(), ORDER_TYPE_SELL) {
-                    if new_order.rate() >= order.rate(){
+                    if new_order.rate() >= order.rate() {
                         if new_order.amount() == order.amount() {
                             vorders_remove.push(order);
 
                             break;
-                        }
-                        else if new_order.amount() > order.amount() {
-                            new_order = new_order.decrease( order.amount() );
+                        } else if new_order.amount() > order.amount() {
+                            new_order = new_order.decrease(order.amount());
                             vorders_remove.push(order);
 
                             continue;
-                        }
-                        else { // new_order.amount() < order.amount()
-                            let order = order.decrease(new_order.amount() );
+                        } else {
+                            // new_order.amount() < order.amount()
+                            let order = order.decrease(new_order.amount());
                             vorders_change.push(order);
 
-                            new_order = new_order.decrease( new_order.amount() );
+                            new_order = new_order.decrease(new_order.amount());
 
                             break;
                         }
                     }
                 } // order.order_type() == ORDER_TYPE_SELL
             }
-        }
-        else {// new_order.order_type() == ORDER_TYPE_SELL
+        } else {
+            // new_order.order_type() == ORDER_TYPE_SELL
             let orders = schema.orders();
             let values = orders.values();
 
             for order in values {
                 if str::eq(order.order_type(), ORDER_TYPE_BUY) {
-                    if new_order.rate() <= order.rate(){
+                    if new_order.rate() <= order.rate() {
                         if new_order.amount() == order.amount() {
                             vorders_remove.push(order);
 
                             break;
-                        }
-                        else if new_order.amount() > order.amount() {
-                            new_order = new_order.decrease( order.amount() );
+                        } else if new_order.amount() > order.amount() {
+                            new_order = new_order.decrease(order.amount());
                             vorders_remove.push(order);
 
                             continue;
-                        }
-                        else { // new_order.amount() < order.amount()
-                            let order = order.decrease(new_order.amount() );
+                        } else {
+                            // new_order.amount() < order.amount()
+                            let order = order.decrease(new_order.amount());
                             vorders_change.push(order);
 
-                            new_order = new_order.decrease( new_order.amount() );
+                            new_order = new_order.decrease(new_order.amount());
 
                             break;
                         }
@@ -237,7 +247,7 @@ impl Transaction for TxOrder {
     }
 }
 
-impl Transaction for TxCancel{
+impl Transaction for TxCancel {
     /// Verify integrity of the transaction by checking the transaction
     /// signature.
     fn verify(&self) -> bool {
@@ -248,9 +258,13 @@ impl Transaction for TxCancel{
     fn execute(&self, view: &mut Fork) {
         //println!("transaction cancel execute for {:?}, name {}", self, self.name());
         let mut schema = ExchangeSchema { view };
-        let mut cancel :bool = false;
+        let mut cancel: bool = false;
         {
-            if str::eq(schema.orders().get(&self.order_id()).unwrap().name(), self.name()) {
+            if str::eq(
+                schema.orders().get(&self.order_id()).unwrap().name(),
+                self.name(),
+            )
+            {
                 cancel = true;
             }
         }
@@ -285,8 +299,8 @@ struct TransactionResponse {
 impl CryptocurrencyApi {
     /// Common processing for transaction-accepting endpoints.
     fn post_make_order<T>(&self, req: &mut Request) -> IronResult<Response>
-        where
-            T: Transaction + Clone + for<'de> Deserialize<'de>,
+    where
+        T: Transaction + Clone + for<'de> Deserialize<'de>,
     {
         match req.get::<bodyparser::Struct<T>>() {
             Ok(Some(transaction)) => {
@@ -302,8 +316,8 @@ impl CryptocurrencyApi {
     }
 
     fn post_cancel_order<T>(&self, req: &mut Request) -> IronResult<Response>
-        where
-            T: Transaction + Clone + for<'de> Deserialize<'de>,
+    where
+        T: Transaction + Clone + for<'de> Deserialize<'de>,
     {
         match req.get::<bodyparser::Struct<T>>() {
             Ok(Some(transaction)) => {
