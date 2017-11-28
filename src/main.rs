@@ -65,18 +65,6 @@ impl Bet {
     }
 }
 
-/// cancel order.
-//encoding_struct! {
-//    struct CancelBet {
-//        const SIZE = 16;
-//
-//        field name:        &str   [00 => 08]
-//        field order_id:    &u64   [08 => 16]
-//    }
-//}
-//
-//impl Bet {}
-
 // // // // // // // // // // DATA LAYOUT // // // // // // // // // //
 
 /// Create schema of the key-value storage implemented by `MemoryDB`. In the
@@ -96,11 +84,6 @@ impl<'a> ExchangeSchema<'a> {
     pub fn bets(&mut self) -> MapIndex<&mut Fork, u64, Bet> {
         MapIndex::new("exchange.bets", self.view)
     }
-
-    /// Get a separate bet from the storage.
-    //pub fn bet(&mut self, order_id: &u16) -> Option<Bet> {
-    //    self.bets().get(order_id)
-    //}
 
     pub fn show_bets(&mut self) {
         let bets : MapIndex<&mut Fork, u64, Bet> = MapIndex::new("exchange.bets", self.view);
@@ -171,7 +154,7 @@ impl Transaction for TxOrder {
             let bets = schema.bets();
             let values = bets.values();
 
-            for bet in /*schema.bets().values()*/values {
+            for bet in values {
                 if bet.order_type() == ORDER_TYPE_SELL {
                     if new_bet.rate() >= bet.rate(){
                         if new_bet.amount() == bet.amount() {
@@ -202,7 +185,7 @@ impl Transaction for TxOrder {
             let bets = schema.bets();
             let values = bets.values();
 
-            for bet in /*schema.bets().values()*/values {
+            for bet in values {
                 if bet.order_type() == ORDER_TYPE_BUY {
                     if new_bet.rate() <= bet.rate(){
                         if new_bet.amount() == bet.amount() {
@@ -244,9 +227,6 @@ impl Transaction for TxOrder {
             schema.bets().put(&new_bet.order_id(), new_bet);
         }
 
-
-        // add new order to the que or do buying/selling in case
-        //schema.process(Bet::new( self.name(), self.amount(), self.rate(), self.order_id(), self.order_type()));
         schema.show_bets();
     }
 
@@ -259,18 +239,17 @@ impl Transaction for TxCancel{
     /// Verify integrity of the transaction by checking the transaction
     /// signature.
     fn verify(&self) -> bool {
-        println!("transaction cancel verify key ");
+        println!("transaction cancel verify key");
         true
     }
 
     /// Apply logic to the storage when executing the transaction.
     fn execute(&self, view: &mut Fork) {
-        println!("transaction cancel execute");
+        println!("transaction cancel execute for {:?}, name {}", self, self.name());
         let mut schema = ExchangeSchema { view };
         let mut cancel :bool = false;
         {
-            let bet: Bet = schema.bets().get(&self.order_id()).unwrap();
-            if bet.name() == self.name() {
+            if str::eq(schema.bets().get(&self.order_id()).unwrap().name(), self.name()) {
                 cancel = true;
             }
         }
@@ -308,14 +287,10 @@ impl CryptocurrencyApi {
         where
             T: Transaction + Clone + for<'de> Deserialize<'de>,
     {
-        println!("implementing of CryptocurrencyApi: fn post_transaction begin");
-
         match req.get::<bodyparser::Struct<T>>() {
             Ok(Some(transaction)) => {
                 let transaction: Box<Transaction> = Box::new(transaction);
-                println!("CryptocurrencyApi: fn post_transaction transaction: {:?}", transaction);
                 let tx_hash = transaction.hash();
-                println!("CryptocurrencyApi: fn post_transaction tx_hash: {:?}", tx_hash);
                 self.channel.send(transaction).map_err(ApiError::from)?;
                 let json = TransactionResponse { tx_hash };
                 self.ok_response(&serde_json::to_value(&json).unwrap())
@@ -342,6 +317,15 @@ impl CryptocurrencyApi {
         }
     }
 
+    /// Endpoint for dumping all orders from the storage.
+    fn get_info(&self, _: &mut Request) -> IronResult<Response> {
+        let mut view = self.blockchain.fork();
+        let mut schema = ExchangeSchema { view: &mut view };
+        let idx = schema.bets();
+        let orders: Vec<Bet> = idx.values().collect();
+        println!("CryptocurrencyApi: fn get_info: {:?}", orders);
+        self.ok_response(&serde_json::to_value(&orders).unwrap())
+    }
 }
 
 /// Implement the `Api` trait.
@@ -350,18 +334,17 @@ impl CryptocurrencyApi {
 /// representation used in Exonum internally.
 impl Api for CryptocurrencyApi {
     fn wire(&self, router: &mut Router) {
-        println!("implementing Api of CryptocurrencyApi: fn wire start");
-
         let self_ = self.clone();
         let post_make_bet = move |req: &mut Request| self_.post_make_bet::<TxOrder>(req);
         let self_ = self.clone();
         let post_cancel_bet = move |req: &mut Request| self_.post_cancel_bet::<TxCancel>(req);
-
-        println!("implementing Api of CryptocurrencyApi: fn wire");
+        let self_ = self.clone();
+        let get_info = move |req: &mut Request| self_.get_info(req);
 
         // Bind handlers to specific routes.
         router.post("/v1/order", post_make_bet, "post_make_bet");
         router.post("/v1/cancel", post_cancel_bet, "post_cancel_bet");
+        router.get("/v1/get_info", get_info, "get_info");
     }
 }
 
